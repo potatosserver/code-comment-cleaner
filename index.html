@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧型多語言程式碼編輯器 (差異預覽版)</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e; --activity-bar-bg: #333333; --sidebar-bg: #252526;
+            --editor-bg: #1e1e1e; --border-color: #444444; --text-color: #cccccc;
+            --icon-active-bg: #3f3f46; --icon-active-border: #007acc; --item-hover-bg: #2a2d2e;
+            --item-active-bg: #37373d; --button-bg: #007acc; --button-hover-bg: #005a9e;
+            --button-danger-bg: #c0392b;
+        }
+        html, body { margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); color: var(--text-color); }
+        .app-container { display: flex; height: 100%; }
+        .activity-bar { width: 50px; background-color: var(--activity-bar-bg); border-right: 1px solid var(--border-color); flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; z-index: 10; }
+        .activity-icon { width: 100%; padding: 12px 0; font-size: 24px; text-align: center; cursor: pointer; position: relative; }
+        .activity-icon:hover { background-color: var(--icon-active-bg); }
+        .activity-icon.active { color: white; }
+        .activity-icon.active::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; background-color: var(--icon-active-border); }
+        .sidebar-container { width: 250px; background-color: var(--sidebar-bg); display: flex; flex-direction: column; transition: width 0.2s ease-out; flex-shrink: 0; }
+        .sidebar-container.hidden { width: 0; opacity: 0; overflow: hidden; }
+        .sidebar-header { padding: 10px 15px; font-size: 11px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .sidebar-controls .icon-btn { cursor: pointer; font-size: 16px; }
+        #file-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
+        .file-item { padding: 8px 15px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #303030; }
+        .file-item:hover { background-color: var(--item-hover-bg); }
+        .file-item.active { background-color: var(--item-active-bg); }
+        .delete-file-btn { color: #ccc; padding: 2px 4px; border-radius: 3px; font-weight: bold; }
+        .delete-file-btn:hover { background-color: var(--button-danger-bg); color: white; }
+        .main-content-container { flex-grow: 1; display: flex; flex-direction: column; min-width: 0; }
+        .toolbar { display: flex; justify-content: flex-end; align-items: center; padding: 8px 20px; background-color: var(--editor-bg); flex-shrink: 0; gap: 15px; }
+        #language-info, #status-info { font-size: 14px; padding: 5px 10px; background-color: var(--sidebar-bg); border-radius: 4px; }
+        #status-info { color: #8cc25a; opacity: 0; transition: opacity 0.5s ease-in-out; }
+        .action-button { background-color: var(--button-bg); color: white; border: none; padding: 8px 15px; font-size: 14px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+        .action-button:hover { background-color: var(--button-hover-bg); }
+        #editor-container { width: 100%; flex-grow: 1; }
+
+        /* --- 差異預覽彈出視窗樣式 --- */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background-color: #2d2d2d; border-radius: 8px; width: 90%; height: 85%; display: flex; flex-direction: column; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .modal-header { padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
+        .modal-title { font-size: 18px; font-weight: 600; }
+        .modal-actions button { margin-left: 10px; }
+        .modal-body { flex-grow: 1; min-height: 0; }
+        #diff-editor-container { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 介面元素... -->
+        <div class="activity-bar"><div class="activity-icon active" id="files-icon" title="檔案總管">📄</div></div>
+        <div class="sidebar-container" id="sidebar">
+            <div class="sidebar-header"><span>EXPLORER</span><div class="sidebar-controls"><span class="icon-btn" id="add-file-btn" title="新增檔案">➕</span></div></div><ul id="file-list"></ul>
+        </div>
+        <div class="main-content-container">
+            <div class="toolbar"><div id="status-info"></div><div id="language-info">語言：N/A</div><button class="action-button" id="preview-remove-btn">預覽註解移除</button></div>
+            <div id="editor-container"></div>
+        </div>
+    </div>
+
+    <!-- 差異預覽彈出視窗 HTML -->
+    <div class="modal-overlay" id="diff-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">預覽變更 (左:原始, 右:移除後)</span>
+                <div class="modal-actions">
+                    <button class="action-button" id="apply-changes-btn">確認並套用變更</button>
+                    <button class="action-button" id="cancel-changes-btn" style="background-color: var(--button-danger-bg);">取消</button>
+                </div>
+            </div>
+            <div class="modal-body"><div id="diff-editor-container"></div></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+    <script>
+        let editor, diffEditor;
+        let currentOpenFile = 'script.js';
+        let isSidebarVisible = true;
+        let cleanedCodeCache = '';
+        const fileStore = { /* ... 檔案內容與之前相同 ... */ };
+
+        // --- 差異預覽視窗邏輯 ---
+        const diffModal = document.getElementById('diff-modal');
+        const applyBtn = document.getElementById('apply-changes-btn');
+        const cancelBtn = document.getElementById('cancel-changes-btn');
+
+        function showDiffModal(originalCode, cleanedCode, lang) {
+            diffModal.style.display = 'flex';
+            if (!diffEditor) {
+                diffEditor = monaco.editor.createDiffEditor(document.getElementById('diff-editor-container'), { theme: 'vs-dark', readOnly: false, enableSplitViewResizing: true });
+            }
+            const originalModel = monaco.editor.createModel(originalCode, lang);
+            const cleanedModel = monaco.editor.createModel(cleanedCode, lang);
+            diffEditor.setModel({ original: originalModel, modified: cleanedModel });
+            cleanedCodeCache = cleanedCode; // 快取清理後的程式碼
+        }
+
+        function closeDiffModal() {
+            diffModal.style.display = 'none';
+        }
+
+        applyBtn.addEventListener('click', () => {
+            editor.setValue(cleanedCodeCache);
+            closeDiffModal();
+            showStatus('✅ 變更已成功套用！', 3000);
+        });
+        cancelBtn.addEventListener('click', closeDiffModal);
+
+        // --- ★★★ 使用 Monaco 內核的移除功能，只產生結果，不直接修改 ★★★ ---
+        function generateCleanedCode(model) {
+            const languageId = model.getLanguageId();
+            const originalLines = model.getLinesContent();
+            let modifiedLines = [...originalLines];
+            
+            const tokenLines = monaco.editor.tokenize(model.getValue(), languageId);
+            let hasComments = false;
+
+            for (let i = tokenLines.length - 1; i >= 0; i--) {
+                let lineContent = modifiedLines[i];
+                for (let j = tokenLines[i].length - 1; j >= 0; j--) {
+                    if (tokenLines[i][j].type.includes('comment')) {
+                        hasComments = true;
+                        const token = tokenLines[i][j];
+                        const endOffset = (j + 1 < tokenLines[i].length) ? tokenLines[i][j + 1].offset : lineContent.length;
+                        lineContent = lineContent.substring(0, token.offset) + lineContent.substring(endOffset);
+                    }
+                }
+                modifiedLines[i] = lineContent;
+            }
+            
+            if (!hasComments) return null; // 如果沒有找到註解，返回 null
+            return modifiedLines.filter(line => line.trim() !== '').join('\n');
+        }
+
+        function previewAndRemoveComments() {
+            if (!editor || !currentOpenFile) return;
+            const model = editor.getModel();
+            const cleanedCode = generateCleanedCode(model);
+
+            if (cleanedCode !== null) {
+                showDiffModal(editor.getValue(), cleanedCode, model.getLanguageId());
+            } else {
+                showStatus('ℹ️ 在此檔案中未找到任何可移除的註解。', 3000);
+            }
+        }
+        
+        // --- 標準 UI 邏輯 (此處省略，與之前版本相同) ---
+        // (為了簡潔，這裡不重複貼上，它們與之前版本完全一樣)
+        const sidebar = document.getElementById('sidebar');
+        const filesIcon = document.getElementById('files-icon');
+        const statusInfo = document.getElementById('status-info');
+        let statusTimeout;
+        fileStore['index.html'] = `<!-- 點擊右上角的按鈕試試！ -->\n<!DOCTYPE html>\n<html><body>\n    <p>字串中的標籤: "<!-- 這不該被移除 -->"</p>\n    <!-- 這是一個真正的註解 -->\n</body></html>`;
+        fileStore['script.js'] = `// 這是一個 JavaScript 檔案\n\nfunction calculate() {\n    const url = "http://example.com"; // 這不是註解，不該移除\n    const text = "字串裡的 // 註解符號";\n    \n    /* 這是一個真正的\n       多行註解 */\n    return 1 + 1; \n}\n`;
+        fileStore['styles.css'] = `/* CSS 檔案範例 */\n\n.container {\n    /* 這是註解 */\n    content: "/* 這不是註解 */";\n}`;
+        function toggleSidebar() { isSidebarVisible = !isSidebarVisible; sidebar.classList.toggle('hidden', !isSidebarVisible); filesIcon.classList.toggle('active', isSidebarVisible); if (editor) editor.layout(); if (diffEditor) diffEditor.layout(); }
+        function showStatus(message, duration = 3000) { clearTimeout(statusTimeout); statusInfo.textContent = message; statusInfo.style.opacity = '1'; statusTimeout = setTimeout(() => { statusInfo.style.opacity = '0'; }, duration); }
+        function getLanguageFromFilename(filename) { const extension = filename ? filename.split('.').pop() : ''; const langMap = { js: 'javascript', ts: 'typescript', css: 'css', html: 'html', json: 'json', md: 'markdown', py: 'python', java: 'java', cs: 'csharp', cpp: 'cpp', sql: 'sql' }; return langMap[extension] || 'plaintext'; }
+        function renderFileExplorer() { const fileList = document.getElementById('file-list'); fileList.innerHTML = ''; Object.keys(fileStore).sort().forEach(filename => { const li = document.createElement('li'); li.className = 'file-item'; if (filename === currentOpenFile) li.classList.add('active'); li.addEventListener('click', () => openFile(filename)); const fileNameSpan = document.createElement('span'); fileNameSpan.textContent = filename; const deleteBtn = document.createElement('span'); deleteBtn.textContent = 'x'; deleteBtn.className = 'delete-file-btn'; deleteBtn.title = `刪除 ${filename}`; deleteBtn.onclick = (e) => { e.stopPropagation(); deleteFile(filename); }; li.appendChild(fileNameSpan); li.appendChild(deleteBtn); fileList.appendChild(li); }); }
+        function openFile(filename) { if (filename === null || !fileStore.hasOwnProperty(filename)) { currentOpenFile = null; editor.setValue(''); monaco.editor.setModelLanguage(editor.getModel(), 'plaintext'); document.getElementById('language-info').textContent = '語言：N/A'; renderFileExplorer(); return; } currentOpenFile = filename; const lang = getLanguageFromFilename(filename); editor.setValue(fileStore[filename]); monaco.editor.setModelLanguage(editor.getModel(), lang); document.getElementById('language-info').textContent = '語言：' + lang; renderFileExplorer(); }
+        function addNewFile() { const filename = prompt("請輸入新檔名:"); if (filename && filename.trim() !== '') { if (!fileStore.hasOwnProperty(filename)) { fileStore[filename] = `// 新檔案: ${filename}\n`; openFile(filename); showStatus(`✅ 已建立檔案 ${filename}`); } else { alert("錯誤：檔案名稱已存在！"); } } }
+        function deleteFile(filename) { if (confirm(`確定要刪除檔案 "${filename}" 嗎？`)) { delete fileStore[filename]; showStatus(`🗑️ 已刪除檔案 ${filename}`); if (currentOpenFile === filename) { const remainingFiles = Object.keys(fileStore); openFile(remainingFiles.length > 0 ? remainingFiles[0] : null); } else { renderFileExplorer(); } } }
+
+        // --- 初始化 ---
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            editor = monaco.editor.create(document.getElementById('editor-container'), { theme: 'vs-dark', automaticLayout: true, fontSize: 14, wordWrap: 'on', minimap: { enabled: true }, fontFamily: 'Consolas, "Courier New", monospace' });
+            editor.getModel().onDidChangeContent(() => { if (currentOpenFile) { fileStore[currentOpenFile] = editor.getValue(); } });
+            filesIcon.addEventListener('click', toggleSidebar);
+            document.getElementById('add-file-btn').addEventListener('click', addNewFile);
+            document.getElementById('preview-remove-btn').addEventListener('click', previewAndRemoveComments);
+            openFile(currentOpenFile);
+        });
+    </script>
+</body>
+</html>
